@@ -1,0 +1,171 @@
+# ==========================================
+# 1. Import Libraries & Load Data
+# ==========================================
+import matplotlib.pyplot as plt
+import numpy as np
+import pandas as pd
+import seaborn as sns
+
+# ضبط مظهر الرسوم البيانية
+plt.style.use("seaborn-v0_8-whitegrid")
+sns.set_palette("muted")
+
+# تحميل البيانات
+df = pd.read_csv("netflix_titles.csv")
+
+print("--- Data Overview ---")
+print(df.info())
+print(df.head())
+
+
+# ==========================================
+# 2. Data Cleaning & Missing Value Handling
+# ==========================================
+# معالجة القيم المفقودة دون إسقاط صفوف
+df["director"] = df["director"].fillna("Unknown Director")
+df["cast"] = df["cast"].fillna("Unknown Cast")
+df["country"] = df["country"].fillna(
+    df["country"].mode()[0]
+)  # استبدال بالقيم الأكثر تكراراً
+df["rating"] = df["rating"].fillna(df["rating"].mode()[0])
+
+# إصلاح وتحويل التواريخ
+df["date_added"] = pd.to_datetime(df["date_added"].str.strip())
+
+# استخراج سنة وشهر الإضافة
+df["year_added"] = df["date_added"].dt.year
+df["month_added"] = df["date_added"].dt.month_name()
+
+# إسقاط الصفوف القليلة جداً المتبقية في date_added إن وجدت
+df = df.dropna(subset=["date_added"])
+df["year_added"] = df["year_added"].astype(int)
+
+
+# ==========================================
+# 3. Advanced Feature Engineering
+# ==========================================
+# استخراج المدة الرقمية (بالدقائق للأفلام، وبالفصول للمسلسلات)
+df["duration_num"] = (
+    df["duration"].str.extract("(\\d+)").astype(float)
+)
+
+
+# تصنيف الأفلام حسب الطول الزمني (Short, Standard, Long)
+def categorize_duration(row):
+    if row["type"] == "Movie":
+        if row["duration_num"] < 60:
+            return "Short (<60 min)"
+        elif row["duration_num"] <= 120:
+            return "Standard (60-120 min)"
+        else:
+            return "Long (>120 min)"
+    else:
+        return "TV Show"
+
+
+df["duration_category"] = df.apply(categorize_duration, axis=1)
+
+# حساب الفرق الزمني بين سنة الإنتاج وسنة الإضافة للمنصة
+df["years_to_add"] = df["year_added"] - df["release_year"]
+# معالجة أي قيم سالبة ناتجة عن أخطاء إدخال في التواريخ
+df["years_to_add"] = df["years_to_add"].apply(lambda x: x if x >= 0 else 0)
+
+
+# ==========================================
+# 4. Data Visualization & EDA
+# ==========================================
+fig = plt.figure(figsize=(16, 12))
+
+# --- Graph 1: Content Distribution (Donut Chart) ---
+plt.subplot(2, 2, 1)
+type_counts = df["type"].value_counts()
+colors = ["#E50914", "#221F1F"]  # ألوان Netflix الشهيرة
+plt.pie(
+    type_counts,
+    labels=type_counts.index,
+    autopct="%1.1f%%",
+    startangle=90,
+    colors=colors,
+    wedgeprops=dict(width=0.4, edgecolor="white"),
+)
+plt.title("Content Distribution (Movies vs TV Shows)", fontsize=14, fontweight="bold")
+
+# --- Graph 2: Top 10 Countries ---
+plt.subplot(2, 2, 2)
+# التعامل مع الدول المتعددة في نفس الصف
+top_countries = (
+    df["country"].str.split(", ").explode().value_counts().head(10)
+)
+sns.barplot(
+    x=top_countries.values, y=top_countries.index, palette="Reds_r"
+)
+plt.title("Top 10 Content Producing Countries", fontsize=14, fontweight="bold")
+plt.xlabel("Number of Titles")
+
+# --- Graph 3: Movie Duration Distribution ---
+plt.subplot(2, 2, 3)
+movies_df = df[df["type"] == "Movie"]
+avg_duration = movies_df["duration_num"].mean()
+
+sns.histplot(
+    movies_df["duration_num"], kde=True, color="#E50914", bins=30
+)
+plt.axvline(
+    avg_duration,
+    color="black",
+    linestyle="--",
+    linewidth=1.5,
+    label=f"Mean: {avg_duration:.1f} min",
+)
+plt.title(
+    "Movie Duration Distribution & Mean", fontsize=14, fontweight="bold"
+)
+plt.xlabel("Duration (Minutes)")
+plt.ylabel("Count")
+plt.legend()
+
+# --- Graph 4: Content Addition Trend Over Time ---
+plt.subplot(2, 2, 4)
+trend_df = (
+    df.groupby(["year_added", "type"])
+    .size()
+    .unstack()
+    .fillna(0)
+)
+# تصفية السنوات الحديثة للوضوح
+trend_df = trend_df[trend_df.index >= 2010]
+
+plt.plot(
+    trend_df.index,
+    trend_df["Movie"],
+    marker="o",
+    color="#E50914",
+    label="Movie",
+    linewidth=2,
+)
+plt.plot(
+    trend_df.index,
+    trend_df["TV Show"],
+    marker="o",
+    color="#221F1F",
+    label="TV Show",
+    linewidth=2,
+)
+plt.title(
+    "Content Addition Trend Over Years (2010+)",
+    fontsize=14,
+    fontweight="bold",
+)
+plt.xlabel("Year Added")
+plt.ylabel("Number of Additions")
+plt.legend()
+
+plt.tight_layout()
+plt.show()
+
+# ==========================================
+# 5. Export Cleaned Dataset for BI Tools
+# ==========================================
+# تصدير البيانات الجاهزة للربط مع Power BI / Tableau
+df.to_csv("netflix_cleaned_processed.csv", index=False)
+print("\n Cleaned data successfully saved to 'netflix_cleaned_processed.csv'")
